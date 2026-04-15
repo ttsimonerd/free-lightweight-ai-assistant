@@ -4,209 +4,127 @@ import android.app.*
 import android.content.*
 import android.content.pm.ServiceInfo
 import android.os.*
-import android.speech.SpeechRecognizer
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.homeai.assistant.R
 import com.homeai.assistant.audio.SpeechInputManager
 import com.homeai.assistant.audio.SpeechOutputManager
-import com.homeai.assistant.camera.CameraController
 import com.homeai.assistant.llm.LocalAssistant
 import com.homeai.assistant.ui.MainActivity
 import kotlinx.coroutines.*
 
 /**
- * HomeAIService – foreground service that keeps the AI assistant running 24/7.
+ * HomeAIService – foreground service that keeps the AI pipeline running 24/7.
  *
- * Responsibilities:
- *  - Acquires a partial wake lock to prevent CPU sleep.
- *  - Manages the full assistant pipeline: camera → person detection → STT → LLM → TTS.
- *  - Broadcasts camera state changes back to MainActivity.
- *  - Responds to ACTION_TOGGLE_CAMERA intents from the UI.
+ * The camera is now owned by MainActivity so the live preview works correctly.
+ * This service receives person-detection events from MainActivity via broadcast,
+ * and broadcasts status + subtitle events back to the activity for display.
+ *
+ * Broadcast contract:
+ *   Inbound  (MainActivity → Service)
+ *     ACTION_PERSON_DETECTED   extra: EXTRA_PERSON_PRESENT (Boolean)
+ *
+ *   Outbound (Service → MainActivity)
+ *     ACTION_AI_STATUS         extra: EXTRA_STATUS ("WAITING"|"LISTENING"|"THINKING"|"SPEAKING")
+ *     ACTION_SUBTITLE          extras: EXTRA_SUBTITLE_TEXT (String), EXTRA_SUBTITLE_IS_USER (Boolean)
  */
 class HomeAIService : Service() {
 
     companion object {
-        private const val TAG = "HomeAIService"
-
-        /** Notification channel ID */
-        private const val CHANNEL_ID = "home_ai_channel"
-
-        /** Notification ID for the persistent foreground notification */
+        private const val TAG            = "HomeAIService"
+        private const val CHANNEL_ID     = "home_ai_channel"
         private const val NOTIFICATION_ID = 101
 
-        /** Broadcast: request camera toggle */
-        const val ACTION_TOGGLE_CAMERA = "com.homeai.assistant.TOGGLE_CAMERA"
+        // ── Inbound ──────────────────────────────────────────────
+        const val ACTION_PERSON_DETECTED  = "com.homeai.assistant.PERSON_DETECTED"
+        const val EXTRA_PERSON_PRESENT    = "present"
 
-        /** Broadcast: camera facing changed */
-        const val ACTION_CAMERA_FACING = "com.homeai.assistant.CAMERA_FACING"
-        const val EXTRA_IS_FRONT       = "is_front"
+        // ── Outbound ─────────────────────────────────────────────
+        const val ACTION_AI_STATUS        = "com.homeai.assistant.AI_STATUS"
+        const val EXTRA_STATUS            = "status"
+
+        const val ACTION_SUBTITLE         = "com.homeai.assistant.SUBTITLE"
+        const val EXTRA_SUBTITLE_TEXT     = "text"
+        const val EXTRA_SUBTITLE_IS_USER  = "is_user"
     }
-
-    // ─────────────────────────────────────────────────────────────
-    // Fields
-    // ─────────────────────────────────────────────────────────────
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
-    private lateinit var wakeLock: PowerManager.WakeLock
-
-    private lateinit var speechInput: SpeechInputManager
+    private lateinit var wakeLock:     PowerManager.WakeLock
+    private lateinit var speechInput:  SpeechInputManager
     private lateinit var speechOutput: SpeechOutputManager
-    private lateinit var cameraController: CameraController
-    private lateinit var assistant: LocalAssistant
+    private lateinit var assistant:    LocalAssistant
 
-    /** Conversation history (SYSTEM prompt + alternating USER/ASSISTANT messages) */
     private val conversationHistory = mutableListOf<LocalAssistant.Message>().also {
-        it.add(
-            LocalAssistant.Message(
-                role = LocalAssistant.Role.SYSTEM,
-                content = LocalAssistant.SYSTEM_PROMPT
-            )
-        )
+        it.add(LocalAssistant.Message(LocalAssistant.Role.SYSTEM, LocalAssistant.SYSTEM_PROMPT))
     }
 
-    private var isPersonPresent = false
-    private var hasGreeted = false
+    private var isPersonPresent   = false
+    private var hasGreeted        = false
     private var isProcessingInput = false
 
     // ─────────────────────────────────────────────────────────────
-    // Broadcast receiver for camera toggle
+    // Person-detection receiver (from MainActivity camera)
     // ─────────────────────────────────────────────────────────────
 
-    private val toggleCameraReceiver = object : BroadcastReceiver() {
+    private val personReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            if (intent?.action == ACTION_TOGGLE_CAMERA) {
-                cameraController.toggleCamera()
-            }
+            val present = intent?.getBooleanExtra(EXTRA_PERSON_PRESENT, false) ?: return
+            if (present == isPersonPresent) return
+            isPersonPresent = present
+            Log.d(TAG, "Person present: $present")
+            if (present) onPersonArrived() else onPersonLeft()
         }
     }
 
     // ─────────────────────────────────────────────────────────────
-    // Service lifecycle
+    // Lifecycle
     // ─────────────────────────────────────────────────────────────
 
     override fun onCreate() {
         super.onCreate()
-        Log.d(TAG, "HomeAIService created")
-
         createNotificationChannel()
         acquireWakeLock()
-        registerCameraToggleReceiver()
 
-        // Initialise modules
-        assistant      = LocalAssistant()
-        speechOutput   = SpeechOutputManager(this).also { it.init() }
-        speechInput    = SpeechInputManager(this).also {
+        assistant    = LocalAssistant()
+        speechOutput = SpeechOutputManager(this).also { it.init() }
+        speechInput  = SpeechInputManager(this).also {
             it.callback = speechCallback
             it.init()
         }
 
-        // CameraController needs a LifecycleOwner – we use a custom owner
-        cameraController = CameraController(
-            context      = this,
-            lifecycleOwner = ServiceLifecycleOwner(),
-            callback     = cameraCallback
-        )
+        val filter = IntentFilter(ACTION_PERSON_DETECTED)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(personReceiver, filter, RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(personReceiver, filter)
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        Log.d(TAG, "HomeAIService onStartCommand")
-
-        // Start as foreground service immediately
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(
                 NOTIFICATION_ID,
                 buildNotification(),
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or
-                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
             )
         } else {
             startForeground(NOTIFICATION_ID, buildNotification())
         }
-
-        cameraController.start()
-
-        return START_STICKY   // restart automatically if killed
+        return START_STICKY
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        Log.d(TAG, "HomeAIService destroyed")
-
         serviceScope.cancel()
-        cameraController.stop()
         speechInput.destroy()
         speechOutput.destroy()
         assistant.close()
         releaseWakeLock()
-        unregisterReceiver(toggleCameraReceiver)
+        unregisterReceiver(personReceiver)
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
-
-    // ─────────────────────────────────────────────────────────────
-    // Camera callback
-    // ─────────────────────────────────────────────────────────────
-
-    private val cameraCallback = object : CameraController.CameraCallback {
-
-        override fun onLensFacingChanged(isFront: Boolean) {
-            Log.d(TAG, "Lens facing changed: ${if (isFront) "FRONT" else "BACK"}")
-            // Notify MainActivity to update the UI label
-            sendBroadcast(Intent(ACTION_CAMERA_FACING).apply {
-                putExtra(EXTRA_IS_FRONT, isFront)
-            })
-        }
-
-        override fun onPersonPresenceChanged(personPresent: Boolean) {
-            if (personPresent == isPersonPresent) return   // no change
-
-            isPersonPresent = personPresent
-            Log.d(TAG, "Person present: $personPresent")
-
-            if (personPresent) {
-                onPersonArrived()
-            } else {
-                onPersonLeft()
-            }
-        }
-    }
-
-    // ─────────────────────────────────────────────────────────────
-    // Speech callback
-    // ─────────────────────────────────────────────────────────────
-
-    private val speechCallback = object : SpeechInputManager.SpeechCallback {
-
-        override fun onSpeechResult(text: String, isFinal: Boolean) {
-            if (!isFinal) return
-
-            Log.d(TAG, "User said: $text")
-            if (!isProcessingInput) {
-                isProcessingInput = true
-                handleUserInput(text)
-            }
-        }
-
-        override fun onListeningStarted() {
-            Log.d(TAG, "Listening started")
-        }
-
-        override fun onListeningEnded() {
-            Log.d(TAG, "Listening ended")
-        }
-
-        override fun onError(errorCode: Int) {
-            Log.w(TAG, "STT error: $errorCode")
-            isProcessingInput = false
-            // Restart listening after a short delay
-            serviceScope.launch {
-                delay(1000)
-                if (isPersonPresent) speechInput.startListening()
-            }
-        }
-    }
 
     // ─────────────────────────────────────────────────────────────
     // Conversation logic
@@ -216,17 +134,18 @@ class HomeAIService : Service() {
         if (!hasGreeted) {
             hasGreeted = true
             serviceScope.launch {
-                delay(800)    // brief pause before greeting
+                delay(800)
                 val greeting = "Hola, estoy aquí si necesitas algo."
+                broadcastSubtitle(greeting, isUser = false)
                 speechOutput.speak(greeting)
                 appendToHistory(LocalAssistant.Role.ASSISTANT, greeting)
-                delay(2000)
-                speechInput.startListening()
+                delay(2200)
+                startListening()
             }
         } else {
             serviceScope.launch {
                 delay(500)
-                speechInput.startListening()
+                startListening()
             }
         }
     }
@@ -235,35 +154,81 @@ class HomeAIService : Service() {
         speechInput.stopListening()
         speechOutput.stop()
         isProcessingInput = false
+        broadcastStatus("WAITING")
+    }
+
+    private val speechCallback = object : SpeechInputManager.SpeechCallback {
+
+        override fun onSpeechResult(text: String, isFinal: Boolean) {
+            if (!isFinal) return
+            Log.d(TAG, "User said: $text")
+            broadcastSubtitle(text, isUser = true)
+            if (!isProcessingInput) {
+                isProcessingInput = true
+                handleUserInput(text)
+            }
+        }
+
+        override fun onListeningStarted() { broadcastStatus("LISTENING") }
+
+        override fun onListeningEnded() {
+            if (!isProcessingInput) broadcastStatus("WAITING")
+        }
+
+        override fun onError(errorCode: Int) {
+            Log.w(TAG, "STT error: $errorCode")
+            isProcessingInput = false
+            broadcastStatus("WAITING")
+            serviceScope.launch {
+                delay(1200)
+                if (isPersonPresent) startListening()
+            }
+        }
+    }
+
+    private fun startListening() {
+        broadcastStatus("LISTENING")
+        speechInput.startListening()
     }
 
     private fun handleUserInput(userText: String) {
         appendToHistory(LocalAssistant.Role.USER, userText)
+        broadcastStatus("THINKING")
 
         serviceScope.launch(Dispatchers.Default) {
             val reply = assistant.generateReply(conversationHistory)
             withContext(Dispatchers.Main) {
-                Log.d(TAG, "Assistant reply: $reply")
+                Log.d(TAG, "Reply: $reply")
                 appendToHistory(LocalAssistant.Role.ASSISTANT, reply)
+                broadcastStatus("SPEAKING")
+                broadcastSubtitle(reply, isUser = false)
                 speechOutput.speak(reply)
                 isProcessingInput = false
-                // Wait for TTS to finish, then listen again
-                delay(500 + reply.length * 50L)
-                if (isPersonPresent) speechInput.startListening()
+                delay(500L + reply.length * 50L)
+                if (isPersonPresent) startListening()
             }
         }
     }
 
     private fun appendToHistory(role: LocalAssistant.Role, content: String) {
         conversationHistory.add(LocalAssistant.Message(role, content))
-        // Keep history at a manageable size (system prompt + last 20 turns)
-        if (conversationHistory.size > 21) {
-            // Remove oldest non-system messages
-            val systemMsg = conversationHistory.first()
-            while (conversationHistory.size > 21) {
-                conversationHistory.removeAt(1)
-            }
-        }
+        while (conversationHistory.size > 21) conversationHistory.removeAt(1)
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Broadcasts to MainActivity
+    // ─────────────────────────────────────────────────────────────
+
+    private fun broadcastStatus(status: String) {
+        sendBroadcast(Intent(ACTION_AI_STATUS).putExtra(EXTRA_STATUS, status))
+    }
+
+    private fun broadcastSubtitle(text: String, isUser: Boolean) {
+        sendBroadcast(
+            Intent(ACTION_SUBTITLE)
+                .putExtra(EXTRA_SUBTITLE_TEXT, text)
+                .putExtra(EXTRA_SUBTITLE_IS_USER, isUser)
+        )
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -272,21 +237,20 @@ class HomeAIService : Service() {
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
+            NotificationChannel(
                 CHANNEL_ID,
                 "Asistente IA",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
                 description = "Notificación del asistente doméstico activo"
                 setShowBadge(false)
+                getSystemService(NotificationManager::class.java)?.createNotificationChannel(this)
             }
-            val manager = getSystemService(NotificationManager::class.java)
-            manager?.createNotificationChannel(channel)
         }
     }
 
     private fun buildNotification(): Notification {
-        val pendingIntent = PendingIntent.getActivity(
+        val pi = PendingIntent.getActivity(
             this, 0,
             Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
@@ -295,10 +259,9 @@ class HomeAIService : Service() {
             .setContentTitle("Asistente IA")
             .setContentText("Escuchando y detectando personas…")
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentIntent(pendingIntent)
+            .setContentIntent(pi)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .build()
     }
 
@@ -309,29 +272,11 @@ class HomeAIService : Service() {
     private fun acquireWakeLock() {
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
         @Suppress("DEPRECATION")
-        wakeLock = pm.newWakeLock(
-            PowerManager.PARTIAL_WAKE_LOCK,
-            "HomeAI::WakeLock"
-        )
-        wakeLock.acquire(/* indefinite – released in onDestroy */)
+        wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "HomeAI::WakeLock")
+        wakeLock.acquire()
     }
 
     private fun releaseWakeLock() {
-        if (::wakeLock.isInitialized && wakeLock.isHeld) {
-            wakeLock.release()
-        }
-    }
-
-    // ─────────────────────────────────────────────────────────────
-    // Toggle camera receiver
-    // ─────────────────────────────────────────────────────────────
-
-    private fun registerCameraToggleReceiver() {
-        val filter = IntentFilter(ACTION_TOGGLE_CAMERA)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(toggleCameraReceiver, filter, RECEIVER_NOT_EXPORTED)
-        } else {
-            registerReceiver(toggleCameraReceiver, filter)
-        }
+        if (::wakeLock.isInitialized && wakeLock.isHeld) wakeLock.release()
     }
 }
