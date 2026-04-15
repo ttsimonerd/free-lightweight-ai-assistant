@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        Dark, fullscreen theme.
+        NoActionBar: removes the action bar for kiosk-like immersive display.
+    -->
+    <style name="Theme.HomeAIAssistant" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <!-- Dark background everywhere -->
+        <item name="colorPrimary">#00FF99</item>
+        <item name="colorPrimaryVariant">#00C87A</item>
+        <item name="colorOnPrimary">#020408</item>
+        <item name="colorSecondary">#00C87A</item>
+        <item name="colorOnSecondary">#020408</item>
+        <item name="android:windowBackground">#020408</item>
+        <item name="android:statusBarColor">#020408</item>
+        <item name="android:navigationBarColor">#020408</item>
+        <!-- Fullscreen flags -->
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+    </style>
+</resources>

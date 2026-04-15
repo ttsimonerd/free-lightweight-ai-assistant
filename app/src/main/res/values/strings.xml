@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Asistente IA</string>
+    <string name="camera_front">Cámara frontal</string>
+    <string name="camera_back">Cámara trasera</string>
+    <string name="camera_toggle">Cambiar cámara</string>
+    <string name="notification_title">Asistente IA</string>
+    <string name="notification_text">Escuchando y detectando personas…</string>
+</resources>

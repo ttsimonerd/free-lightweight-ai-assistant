@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    activity_main.xml
+    Dark fullscreen layout with centred EyesView and a top-right camera
+    indicator overlay.
+-->
+<androidx.constraintlayout.widget.ConstraintLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#020408"
+    android:keepScreenOn="true">
+
+    <!-- ── Animated eyes (centred) ── -->
+    <com.homeai.assistant.ui.EyesView
+        android:id="@+id/eyesView"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:background="#020408"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <!-- ── Camera overlay (top-right corner) ── -->
+    <LinearLayout
+        android:id="@+id/cameraOverlay"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="12dp"
+        android:gravity="end"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginTop="16dp"
+        android:layout_marginEnd="16dp">
+
+        <!-- Camera label + dot row -->
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <!-- Green "active" dot -->
+            <View
+                android:id="@+id/cameraActiveDot"
+                android:layout_width="10dp"
+                android:layout_height="10dp"
+                android:layout_marginEnd="6dp"
+                android:background="@drawable/shape_green_dot" />
+
+            <!-- Camera label: "Cámara frontal" / "Cámara trasera" -->
+            <TextView
+                android:id="@+id/tvCameraLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/camera_front"
+                android:textColor="#00FF99"
+                android:textSize="13sp"
+                android:fontFamily="sans-serif-medium" />
+        </LinearLayout>
+
+        <!-- Toggle button -->
+        <Button
+            android:id="@+id/btnToggleCamera"
+            android:layout_width="wrap_content"
+            android:layout_height="32dp"
+            android:layout_marginTop="6dp"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:text="@string/camera_toggle"
+            android:textSize="11sp"
+            android:textColor="#020408"
+            android:backgroundTint="#00FF99"
+            style="@style/Widget.MaterialComponents.Button"
+            android:minHeight="0dp"
+            android:minWidth="0dp" />
+
+    </LinearLayout>
+
+</androidx.constraintlayout.widget.ConstraintLayout>
