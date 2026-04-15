@@ -1,1 +1,0 @@
-# free-lightweight-ai-assistant
