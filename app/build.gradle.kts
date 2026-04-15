@@ -13,6 +13,14 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "1.0"
+
+        // Inject Groq API key from environment variable (set as GitHub Actions Secret)
+        // The key never appears in source code — only in the compiled binary.
+        buildConfigField(
+            "String",
+            "GROQ_API_KEY",
+            "\"${System.getenv("GROQ_API_KEY") ?: ""}\""
+        )
     }
 
     buildTypes {
@@ -33,8 +41,8 @@ android {
     }
     buildFeatures {
         viewBinding = true
+        buildConfig = true
     }
-    // Needed to avoid duplicate files from TFLite
     packaging {
         resources {
             pickFirsts += listOf(
@@ -45,7 +53,6 @@ android {
             )
         }
     }
-    // Allow TFLite model files to not be compressed
     aaptOptions {
         noCompress("tflite")
     }
