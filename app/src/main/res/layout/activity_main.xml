@@ -1,9 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-    activity_main.xml
-    Dark fullscreen layout with centred EyesView and a top-right camera
-    indicator overlay.
--->
 <androidx.constraintlayout.widget.ConstraintLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
@@ -12,7 +7,7 @@
     android:background="#020408"
     android:keepScreenOn="true">
 
-    <!-- ── Animated eyes (centred) ── -->
+    <!-- Full-screen animated eyes -->
     <com.homeai.assistant.ui.EyesView
         android:id="@+id/eyesView"
         android:layout_width="0dp"
@@ -23,61 +18,109 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
 
-    <!-- ── Camera overlay (top-right corner) ── -->
+    <!-- Status indicator (top centre) -->
+    <TextView
+        android:id="@+id/tvStatus"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Esperando..."
+        android:textColor="#888888"
+        android:textSize="13sp"
+        android:fontFamily="sans-serif-medium"
+        android:paddingHorizontal="14dp"
+        android:paddingVertical="5dp"
+        android:background="@drawable/shape_status_bg"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginTop="22dp" />
+
+    <!-- Camera overlay top-right: dot + label + toggle -->
     <LinearLayout
         android:id="@+id/cameraOverlay"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="12dp"
         android:gravity="end"
+        android:padding="10dp"
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
-        android:layout_marginTop="16dp"
-        android:layout_marginEnd="16dp">
+        android:layout_marginTop="12dp"
+        android:layout_marginEnd="12dp">
 
-        <!-- Camera label + dot row -->
         <LinearLayout
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:gravity="center_vertical">
 
-            <!-- Green "active" dot -->
             <View
                 android:id="@+id/cameraActiveDot"
-                android:layout_width="10dp"
-                android:layout_height="10dp"
-                android:layout_marginEnd="6dp"
+                android:layout_width="8dp"
+                android:layout_height="8dp"
+                android:layout_marginEnd="5dp"
                 android:background="@drawable/shape_green_dot" />
 
-            <!-- Camera label: "Cámara frontal" / "Cámara trasera" -->
             <TextView
                 android:id="@+id/tvCameraLabel"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="@string/camera_front"
                 android:textColor="#00FF99"
-                android:textSize="13sp"
+                android:textSize="12sp"
                 android:fontFamily="sans-serif-medium" />
         </LinearLayout>
 
-        <!-- Toggle button -->
         <Button
             android:id="@+id/btnToggleCamera"
             android:layout_width="wrap_content"
-            android:layout_height="32dp"
-            android:layout_marginTop="6dp"
-            android:paddingStart="12dp"
-            android:paddingEnd="12dp"
+            android:layout_height="30dp"
+            android:layout_marginTop="5dp"
+            android:paddingStart="10dp"
+            android:paddingEnd="10dp"
             android:text="@string/camera_toggle"
-            android:textSize="11sp"
+            android:textSize="10sp"
             android:textColor="#020408"
             android:backgroundTint="#00FF99"
             style="@style/Widget.MaterialComponents.Button"
             android:minHeight="0dp"
             android:minWidth="0dp" />
-
     </LinearLayout>
+
+    <!-- Camera preview mini window (bottom-left) wrapped in a card for rounded corners -->
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/previewCard"
+        android:layout_width="130dp"
+        android:layout_height="97dp"
+        app:cardCornerRadius="8dp"
+        app:cardElevation="0dp"
+        app:strokeColor="#4400FF99"
+        app:strokeWidth="1dp"
+        android:layout_marginStart="14dp"
+        android:layout_marginBottom="12dp"
+        app:layout_constraintBottom_toTopOf="@id/tvSubtitle"
+        app:layout_constraintStart_toStartOf="parent">
+
+        <androidx.camera.view.PreviewView
+            android:id="@+id/previewView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+    </com.google.android.material.card.MaterialCardView>
+
+    <!-- Subtitle bar (bottom, hidden when empty) -->
+    <TextView
+        android:id="@+id/tvSubtitle"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:text=""
+        android:textColor="#FFFFFF"
+        android:textSize="14sp"
+        android:lineSpacingExtra="2dp"
+        android:padding="14dp"
+        android:background="#BB000000"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>
